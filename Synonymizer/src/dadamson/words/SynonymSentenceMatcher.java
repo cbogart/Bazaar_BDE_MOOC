@@ -297,7 +297,7 @@ public class SynonymSentenceMatcher extends ASentenceMatcher
 	@Override
 	public double getSentenceSimilarity(String incoming, String target)
 	{
-		return this.getSentenceSimilarity(incoming, target, 0.4, true, true);
+		return this.getSentenceSimilarity(incoming, target, 10000, true, true);
 	}
 
 	public double getSentenceSimilarity(String incoming, String target, double lengthThreshold, boolean polarityMustMatch, boolean removeStopwords)

@@ -110,7 +110,6 @@ public class TutorActor extends BasilicaAdapter implements TimeoutReceiver
 	private String tutorialCondition = "tutorial";
 	private int numUser = 1; //number of students currently in chat room
 	
-	private boolean block = false; //whether to block agent's tutoring
 
 	// private List<Dialog> dialogsReadyQueue = new ArrayList<Dialog>();
 
@@ -223,18 +222,6 @@ public class TutorActor extends BasilicaAdapter implements TimeoutReceiver
 //		{
 //			return;
 //		}
-		//Block agent's tutoring for 15 seconds
-		//This flag will be true when a student has just entered
-		//a chat room
-		if(block)
-		{
-			try {
-			    Thread.sleep(15000);                 //1000 milliseconds is one second.
-			} catch(InterruptedException ex) {
-			    Thread.currentThread().interrupt();
-			}
-			block = false;
-		}
 		if (e instanceof DoTutoringEvent)
 		{
 			//queue up the start of the tutoring engine.
@@ -251,20 +238,6 @@ public class TutorActor extends BasilicaAdapter implements TimeoutReceiver
 			//keeping track of number of students in the chat room
 			PresenceEvent event = (PresenceEvent) e;
 			numUser = event.getNumUsers();
-		}
-		else if (e instanceof PromptEvent)
-		{
-			PromptEvent event  = (PromptEvent) e;
-			//If a student just entered the chat room and
-			// agent is introducing/greeting her
-			// then block flag will be true
-			// which means agent's tutoring will be blocked for next 15 seconds
-			// so that the incoming student has time to interact with other students in the room
-			// and agent does not interrupt with tutoring prompts
-			if(event.from.equals("INTRODUCTION"))
-			{
-				block = true;
-			}
 		}
 		else if (e instanceof MessageEvent)
 		{

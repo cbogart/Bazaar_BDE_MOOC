@@ -63,7 +63,7 @@ public class ActivityTracker extends BasilicaAdapter implements TimeoutReceiver
 													// minutes is bad!
 	private Map<String, Integer> messageCounts;
 	private int totalMessages = 0;
-	private boolean shouldTrack = true;
+	private boolean shouldTrack = false;
 	private InputCoordinator source;
 	private String status = "";
 	private boolean isTracking;
