@@ -16,7 +16,7 @@
         
     </stage>
     <stage name="body" type="other" delay="300">
-        <step type="prompt" delay="300">...</step>
+        <!-- <step type="prompt" delay="300">...</step>
     	<step type="whiteboard" delay="5" path="http://i59.tinypic.com/5ap2co.png">SHOW_IMAGE</step>
         <step type="prompt" delay="600" prompt="QUESTION1" >QUESTION1</step>
     	<step type="whiteboard" delay="5" path="http://i59.tinypic.com/5ap2co.png">SHOW_IMAGE</step>
@@ -28,6 +28,8 @@
     	<step type="whiteboard" delay="5" path="http://i59.tinypic.com/5ap2co.png">SHOW_IMAGE</step>
         <step type="prompt" delay="600" prompt="QUESTION5" >QUESTION5</step>
     	<step type="whiteboard" delay="5" path="http://i59.tinypic.com/5ap2co.png">SHOW_IMAGE</step>
-        <step type="prompt" delay="600" prompt="QUESTION6" >QUESTION6</step>
+        <step type="prompt" delay="600" prompt="QUESTION6" >QUESTION6</step>  -->
+        <step type="prompt" delay="86400" prompt="FINISH">FINISH_STEP</step>
+        <step type="logout" delay="300">LOGOUT</step>
     </stage>
 </plan>

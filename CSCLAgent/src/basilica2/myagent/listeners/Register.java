@@ -10,7 +10,12 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import dadamson.words.ASentenceMatcher;
+import dadamson.words.SynonymSentenceMatcher;
 import edu.cmu.cs.lti.basilica2.core.Event;
+import edu.cmu.cs.lti.project911.utils.log.Logger;
+import edu.cmu.cs.lti.project911.utils.time.TimeoutReceiver;
+import edu.cmu.cs.lti.project911.utils.time.Timer;
 import basilica2.agents.components.InputCoordinator;
 import basilica2.agents.events.MessageEvent;
 import basilica2.agents.events.PresenceEvent;
@@ -32,7 +37,7 @@ import basilica2.myagent.Topic;
 import basilica2.myagent.User;
 
 
-public class Register implements BasilicaPreProcessor
+public class Register implements BasilicaPreProcessor, TimeoutReceiver
 {
 
 	
@@ -42,15 +47,35 @@ public class Register implements BasilicaPreProcessor
     	topicList = new ArrayList<Topic>();
     	userList = new ArrayList<User>();
     	lastConsolidation = 0;
+    	contentful = false; //whether anything contentful has been said in the chat room
+    	time_slot_no = 0;  // topic id
+    	dormant_group = false; //if no one is speaking in the group
+    	time_slot_messages = " "; // discussion done for a topic
 		String dialogueConfigFile="dialogues/dialogues-example.xml";
     	loadconfiguration(dialogueConfigFile);
-
+    	startTimer(); //start tracking chat room activity
 	}    
     
 	public ArrayList<Topic> topicList;	
 	public ArrayList<User> userList;
 	public int lastConsolidation;
-
+    public static Timer timer;
+    public InputCoordinator src;
+    public Topic currentTopic; //topic being discussed currenlty
+    public boolean contentful;
+    public int time_slot_no;
+    public boolean dormant_group;
+    public String time_slot_messages; 
+    
+    private double similarity_threshold = .5; //similarity expected between question (topic) being asked and discussion being done by the group
+    private int activity_prompt_pulse = 2; //checking group activity after every 2 minutes
+	
+    public void startTimer()
+    {
+    	timer = new Timer(activity_prompt_pulse * 60, this);
+    	timer.start();
+    }
+    
 	private void loadconfiguration(String f)
 	{
 		try
@@ -68,9 +93,19 @@ public class Register implements BasilicaPreProcessor
 					for (int i = 0; i < conceptNodes.getLength(); i++)
 					{
 						Element conceptElement = (Element) conceptNodes.item(i);
-						String conceptName = conceptElement.getAttribute("concept");
-						String conceptDetailedName = conceptElement.getAttribute("description"); 
-						Topic topic = new Topic(conceptName, conceptDetailedName);
+						String conceptName = conceptElement.getAttribute("concept");// topic name
+						String conceptDetailedName = conceptElement.getAttribute("description"); //brief summary for topic
+						String pokeMessage = conceptElement.getAttribute("poke_message"); //poke message if nothing contentful has been said for a topic/question recently
+						
+						NodeList introNodes = conceptElement.getElementsByTagName("intro"); //prompt message (topic/question)
+						String introText = "";
+						if ((introNodes != null) && (introNodes.getLength() != 0))
+						{
+							Element introElement = (Element) introNodes.item(0);
+							introText = introElement.getTextContent();
+						}
+						
+						Topic topic = new Topic(conceptName, conceptDetailedName, introText, pokeMessage);
 						topicList.add(topic);
 					}
 				}
@@ -118,6 +153,47 @@ public class Register implements BasilicaPreProcessor
 			userList.get(i).score += increment;
 		}
 	}
+	
+	
+	public void prompt_topic()
+	{
+		boolean topic_found = false;
+		
+		for (int i = 0; i < topicList.size(); i++)
+		{
+			Topic topic = topicList.get(i);
+			if (topic.topic_prompted == null)
+			{
+				PromptEvent prompt = new PromptEvent(src, topic.intro_text , "TOPIC_PROMPT");
+				src.queueNewEvent(prompt);
+				currentTopic = topic;
+				
+				Date date= new Date();
+				Timestamp currentTimestamp= new Timestamp(date.getTime());
+				topic.topic_prompted = currentTimestamp;
+				lastConsolidation++;
+				topic_found = true;
+				break;
+			}
+		}	
+		
+		if(!topic_found)
+		{
+			reset_topics();
+			prompt_topic();
+		}
+	}
+	
+	
+	public void reset_topics()
+	{
+		for (int i = 0; i < topicList.size(); i++)
+		{
+			Topic topic = topicList.get(i);
+			topic.topic_prompted = null;
+			topic.topic_discussed = null;
+		}
+	}
 	/**
 	 * @param source the InputCoordinator - to push new events to. (Modified events don't need to be re-pushed).
 	 * @param event an incoming event which matches one of this preprocessor's advertised classes (see getPreprocessorEventClasses)
@@ -128,87 +204,23 @@ public class Register implements BasilicaPreProcessor
 	@Override
 	public void preProcessEvent(InputCoordinator source, Event event)
 	{
-
+		src = source;
 		if (event instanceof MessageEvent)
 		{
 			MessageEvent me = (MessageEvent)event;
-			String[] annotations = me.getAllAnnotations();
-
-			if(me.hasAnnotations("neg"))
-			{
-				System.out.println("hurray");
-			}
-			for (String s: annotations)
-		    {
-				System.out.println("***** " + s);
-				for (String a: annotations)
-			    {
-					Topic TopicDetected = IsInTopicList(s+"_"+a);
-					if(TopicDetected != null && TopicDetected.topic_detected == null
-							                 && TopicDetected.topic_prompted == null)
-					{
-						Date date= new Date();
-						TopicDetected.topic_detected = new Timestamp(date.getTime());
-						
-						String prompt_message = "I noticed that you are talking about " + TopicDetected.detailed_name +
-								                ". If you want to check your knowledge on " + TopicDetected.detailed_name + 
-								                " with me say 'LET'S DISCUSS ABOUT " + TopicDetected.detailed_name + "' and I will ask some questions on it.";
-						PromptEvent prompt = new PromptEvent(source,prompt_message,"TOPIC_ELICITATION");
-						source.queueNewEvent(prompt);
-						incrementScore(1);
-						lastConsolidation++;
-					}
-					else if(s.equals("TOPIC_REQUEST"))
-					{
-						for (String ss: annotations)
-					    {
-							System.out.println(a+"_"+ss);
-							Topic t = IsInTopicList(a+"_"+ss);
-							if(t != null && t.topic_requested == null)
-							{
-								Date date= new Date();
-								Timestamp currentTimestamp= new Timestamp(date.getTime());
-								t.topic_requested = currentTimestamp;
-							    	
-								DoTutoringEvent toot = new DoTutoringEvent(source, t.name);
-								source.addPreprocessedEvent(toot);
-								incrementScore(2);
-								break;
-					
-							}
-					    }
-					}
-			    }	
-	        }								    
+			String message = me.getText();
+			time_slot_messages = time_slot_messages + message + " ";
 	    }
 		else if ((event instanceof DormantGroupEvent) || 
 				 (event instanceof DormantStudentEvent && userList.size() == 1))
 		{
 			System.out.println("Nothing happened since long.");
-			for (int i = 0; i < topicList.size(); i++)
-			{
-				Topic topic = topicList.get(i);
-				if (topic.topic_detected == null && topic.topic_prompted == null)
-				{
-					String prompt_message = "You can discuss about " + topic.detailed_name +
-			                ". If you want to check your knowledge on " + topic.detailed_name + 
-			                " with me say 'LET'S DISCUSS ABOUT " + topic.detailed_name + "'";
-					PromptEvent prompt = new PromptEvent(source, prompt_message , "TOPIC_PROMPTED");
-					source.queueNewEvent(prompt);
-					
-			    	//DoTutoringEvent toot = new DoTutoringEvent(source, topic.name);
-					//source.addPreprocessedEvent(toot);
-					
-					Date date= new Date();
-					Timestamp currentTimestamp= new Timestamp(date.getTime());
-					topic.topic_prompted = currentTimestamp;
-					break;
-				}
-			}
+			dormant_group = true;
 		}
 		else if (event instanceof PresenceEvent)
 		{
 			PresenceEvent pe = (PresenceEvent) event;
+			Boolean prompt_first_topic = false;
 			if (!pe.getUsername().contains("Tutor") && !source.isAgentName(pe.getUsername()))
 			{
 
@@ -235,36 +247,48 @@ public class Register implements BasilicaPreProcessor
 						{
 							if(userList.size() < 2)
 							{
-								prompt_message = prompt_message + "I'm VirtualCarolyn. I'm here to have an interactive dialogue with you to assist you in your discussion on metereological concepts\n";
-								prompt_message = prompt_message + "You can wait for another person to join or start discussing with me a metereological concept.";
+								prompt_message = prompt_message + "Hi! I'm VirtualRyan, joining you for the last week of Big Data and Education. In this activity, we’ll reflect on the lectures from this week, and discuss some of the core ideas.\n";
+								prompt_first_topic = true;
 							}
 							else
 							{
-								prompt_message = prompt_message + "We are just starting the discussion on metereological concepts. Can one of you start talking about a metereological concept. ?";
+								prompt_message = prompt_message + "We are just starting a discussion on some of the core ideas in the lectures from this week.\n";
 							}
 						}
 						else
 						{
+							prompt_message = prompt_message + "We are discussing some of the core ideas in the lectures from this week.\n";
+							prompt_message = prompt_message + "We have discussed  " + discussed_topics + "\n";
+							
 							if(lastConsolidation > 1 && userList.size() > 2)
 							{
 								lastConsolidation = 0;
-								prompt_message = prompt_message + "Can any one of you provide a summary of our discussion till now to " + username;
+								prompt_message = prompt_message + "Can someone provide a summary of our current discussion for  " + username + " ?\n";
+								
+							}
+							if(lastConsolidation > 1 && userList.size() == 2)
+							{
+								lastConsolidation = 0;
+								prompt_message = prompt_message + userList.get(0).name + ", can you provide a summary of our current discussion for " + username  + " ?\n";
 								
 							}
 							else
 							{
-								prompt_message = prompt_message + "We have been discussing on topics like  " + discussed_topics + "\n";
+								prompt_message = prompt_message + "Currently we are discussing  " + currentTopic.detailed_name + "\n";
 								prompt_message = prompt_message + "Please join in.";
 							}
 							
 													
 						}
 						
-						
 						PromptEvent prompt = new PromptEvent(source, prompt_message , "INTRODUCTION");
 						source.queueNewEvent(prompt);
+						
+						if(prompt_first_topic)
+						{
+							prompt_topic();
+						}
 					}
-					
 				}
 				else if (pe.getType().equals(PresenceEvent.ABSENT))
 				{
@@ -286,10 +310,9 @@ public class Register implements BasilicaPreProcessor
     	for (int i = 0; i < topicList.size(); i++)
 		{
 			Topic topic = topicList.get(i);
-			if (topic.topic_detected  != null ||
-			    topic.topic_discussed != null || 
-			    topic.topic_requested != null 
-				)
+			if (
+			    topic.topic_discussed != null 
+			   )
 				{
 					discussed_topics.add(topic.detailed_name);
 				}
@@ -297,6 +320,7 @@ public class Register implements BasilicaPreProcessor
     	
     	return  discussed_topics.size() > 0 ? StringUtils.join(discussed_topics) : null;
     }
+    
 	public void checkOutdatedTopics()
 	{
 		Timestamp oldestStudent = oldestStudent();
@@ -305,10 +329,8 @@ public class Register implements BasilicaPreProcessor
 		{
 			for (int i = 0; i < topicList.size(); i++)
 			{
-				topicList.get(i).topic_detected = null;
 				topicList.get(i).topic_discussed = null;
 				topicList.get(i).topic_prompted = null;
-				topicList.get(i).topic_requested = null;
 			}
 		}
 		else
@@ -316,16 +338,12 @@ public class Register implements BasilicaPreProcessor
 			for (int i = 0; i < topicList.size(); i++)
 			{
 				Topic topic = topicList.get(i);
-				if ((topic.topic_detected  == null || topic.topic_detected.before(oldestStudent))  &&
-					(topic.topic_discussed == null || topic.topic_discussed.before(oldestStudent)) &&
-					(topic.topic_prompted  == null || topic.topic_prompted.before(oldestStudent))  &&
-					(topic.topic_requested == null || topic.topic_requested.before(oldestStudent))
+				if ((topic.topic_discussed == null || topic.topic_discussed.before(oldestStudent)) &&
+					(topic.topic_prompted  == null || topic.topic_prompted.before(oldestStudent))
 				   )
 				{
-					topicList.get(i).topic_detected = null;
 					topicList.get(i).topic_discussed = null;
-					topicList.get(i).topic_prompted = null;
-					topicList.get(i).topic_requested = null;					
+					topicList.get(i).topic_prompted = null;		
 				}
 			}
 		}
@@ -371,5 +389,72 @@ public class Register implements BasilicaPreProcessor
 	{
 		//only MessageEvents will be delivered to this watcher.
 		return new Class[]{MessageEvent.class, DormantGroupEvent.class, PresenceEvent.class, DormantStudentEvent.class};
+	}
+
+
+
+	@Override
+	public void log(String arg0, String arg1, String arg2) {
+		// TODO Auto-generated method stub
+		
+	}
+
+
+
+	@Override
+	public void timedOut(String arg0) {
+		
+		// TODO Auto-generated method stub
+		
+		time_slot_no++;
+		Date date= new Date();
+		Timestamp currentTimestamp= new Timestamp(date.getTime());
+		
+		ASentenceMatcher matcher = new SynonymSentenceMatcher("stopwords.txt");
+		
+		double similarityScore = 0;
+		try{
+			similarityScore = matcher.getSentenceSimilarity(time_slot_messages, currentTopic.intro_text.trim());
+		}
+		catch(Exception e)
+		{
+			System.err.println("Caught Exception: " + e.getMessage());
+		}
+		
+		if(similarityScore > similarity_threshold)
+		{
+			contentful = true;
+		}
+		System.out.println(similarityScore+"$"+time_slot_messages+"$"+currentTopic.intro_text.trim());
+		
+		time_slot_messages = " ";
+		
+		if(dormant_group || !contentful)
+		{
+			if(time_slot_no == 1)
+			{
+				String poke_message = currentTopic.poke_message;
+				PromptEvent prompt = new PromptEvent(src, poke_message , "POKING");
+				src.queueNewEvent(prompt);
+			}
+			else
+			{
+				time_slot_no = 0;
+				currentTopic.topic_discussed = currentTimestamp;
+				prompt_topic();
+			}
+			dormant_group = false;
+		}
+		else
+		{
+			contentful = false;
+			if(time_slot_no == 5)//constant
+			{
+				time_slot_no = 0;
+				currentTopic.topic_discussed = currentTimestamp;
+				prompt_topic();
+			}
+		}
+		startTimer();
 	}
 }

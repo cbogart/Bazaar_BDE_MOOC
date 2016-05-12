@@ -74,5 +74,9 @@
     <prompt strategy="task" id="QUESTION6">
         <text>Also discuss among yourselves where all of you would expect expect the highest wind speeds to occur over the area of the map on right of your screen.</text>
     </prompt>
- 
+
+    <prompt strategy="task" id="FINISH">
+    <text>Now this activity has come to an end. Thanks for a great chat!</text>
+    </prompt>
+     
 </prompts>
